@@ -1,0 +1,20 @@
+name: Validate Wallpaper Control Centre
+
+on:
+  push:
+    branches: [main, feat/live-wallpaper-engine]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Compile Python sources
+        run: python -m compileall -q wallpaper_control_centre.py live_wallpaper_engine.py
+      - name: Validate installer shell syntax
+        run: bash -n install.sh
