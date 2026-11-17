@@ -142,6 +142,9 @@ def gui():
             live_side.pack_start(self.auto_optimize,False,False,0)
             optimize_hint=Gtk.Label(label="Creates a separate H.264/AAC copy: max 1080p, up to 30 FPS. Original files are never overwritten.")
             optimize_hint.set_line_wrap(True); optimize_hint.set_xalign(0); live_side.pack_start(optimize_hint,False,False,0)
+            self.optimize_progress=Gtk.ProgressBar(); self.optimize_progress.set_show_text(True)
+            self.optimize_progress.set_text("Optimization progress")
+            live_side.pack_start(self.optimize_progress,False,False,0)
             self.add_button(live_side,"Start / apply live wallpaper",self.start_video)
             self.add_button(live_side,"Pause / resume",self.toggle_pause)
             self.add_button(live_side,"Restart video",self.restart_video)
@@ -183,14 +186,21 @@ def gui():
             self.status.set_text(f"Optimizing {path.name}… This may take a while on the PrimeBook.")
             def worker():
                 try:
-                    result=optimize_video(path,LIBRARY)
+                    result=optimize_video(path,LIBRARY,progress=lambda value: GLib.idle_add(self.update_optimization_progress,value))
                     GLib.idle_add(self.optimization_finished,result,None)
                 except (OptimizerError,OSError) as exc:
                     GLib.idle_add(self.optimization_finished,None,str(exc))
             threading.Thread(target=worker,name="wallpaper-mp4-optimizer",daemon=True).start()
 
+        def update_optimization_progress(self,value):
+            self.optimize_progress.set_fraction(value/100.0)
+            self.optimize_progress.set_text(f"Encoding… {value:.0f}%")
+            return False
+
         def optimization_finished(self,result,error):
             self.optimizing=False; self.optimize_button.set_sensitive(True)
+            self.optimize_progress.set_fraction(0.0)
+            self.optimize_progress.set_text("Optimization progress")
             if error:
                 self.status.set_text(f"Optimization failed: {error}")
                 self.alert(f"MP4 optimization failed:\n{error}")
