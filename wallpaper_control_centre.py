@@ -59,10 +59,20 @@ def engine(*args,check=True):
     return output
 
 def restore_live():
-    data=read_json(LIVE_CONFIG); path=Path(data.get("path","")).expanduser()
-    if not data.get("restore_on_login",False) or not path.is_file(): return
+    data=read_json(LIVE_CONFIG)
+    if not data: return
+    path=Path(data.get("path","")).expanduser()
+    if not data.get("restore_on_login",False) or not path.is_file():
+        # A previous session may have left XFCE's native icon style disabled.
+        # Stop/recover stale backend state even when the user opted out of video autostart.
+        try: engine("stop",check=False)
+        except WallpaperError: pass
+        return
     try:
-        engine("start",path,"--volume",int(data.get("volume",65)),*([] if data.get("audio",True) else ["--no-audio"]))
+        args=["start",path,"--volume",int(data.get("volume",65))]
+        if not data.get("audio",True): args.append("--no-audio")
+        args.append("--restore-on-login")
+        engine(*args)
         print(f"Restored live wallpaper: {path}")
     except WallpaperError as exc:
         print(f"Live wallpaper restore skipped: {exc}",file=sys.stderr)
