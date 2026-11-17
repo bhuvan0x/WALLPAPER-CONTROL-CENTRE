@@ -7,6 +7,7 @@ from video_optimizer import optimize_video, OptimizerError
 HOME=Path.home(); LIBRARY=HOME/"Pictures"/"Wallpapers"
 CONFIG=HOME/".config"/"wallpaper-control-centre"/"state.json"
 LIVE_CONFIG=HOME/".config"/"wallpaper-control-centre"/"live.json"
+OPTIMIZER_CONFIG=HOME/".config"/"wallpaper-control-centre"/"optimizer.json"
 APP=HOME/".local/share/wallpaper-control-centre"
 ENGINE=APP/"live_wallpaper_engine.py"
 IMAGE_EXTS={".png",".jpg",".jpeg",".webp",".bmp",".gif"}
