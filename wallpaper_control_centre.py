@@ -52,17 +52,27 @@ def apply(path,mode="zoomed",persist=True):
 
 def engine(*args,check=True):
     if not ENGINE.is_file(): raise WallpaperError("Live wallpaper engine is not installed.")
-    try: p=subprocess.run([sys.executable,str(ENGINE),*map(str,args)],text=True,capture_output=True,timeout=20)
+    try: p=subprocess.run([sys.executable,str(ENGINE),*map(str,args)],text=True,capture_output=True,timeout=45)
     except (OSError,subprocess.TimeoutExpired) as e: raise WallpaperError(f"Live wallpaper command failed: {e}") from e
     output=(p.stdout or "").strip()
     if check and p.returncode: raise WallpaperError((p.stderr or output or "Live wallpaper command failed.").strip())
     return output
 
 def restore_live():
-    data=read_json(LIVE_CONFIG); path=Path(data.get("path","")).expanduser()
-    if not path.is_file(): return
+    data=read_json(LIVE_CONFIG)
+    if not data: return
+    path=Path(data.get("path","")).expanduser()
+    if not data.get("restore_on_login",False) or not path.is_file():
+        # A previous session may have left XFCE's native icon style disabled.
+        # Stop/recover stale backend state even when the user opted out of video autostart.
+        try: engine("stop",check=False)
+        except WallpaperError: pass
+        return
     try:
-        engine("start",path,"--volume",int(data.get("volume",65)),*([] if data.get("audio",True) else ["--no-audio"]))
+        args=["start",path,"--volume",int(data.get("volume",65))]
+        if not data.get("audio",True): args.append("--no-audio")
+        args.append("--restore-on-login")
+        engine(*args)
         print(f"Restored live wallpaper: {path}")
     except WallpaperError as exc:
         print(f"Live wallpaper restore skipped: {exc}",file=sys.stderr)
@@ -130,7 +140,13 @@ def gui():
             self.add_button(live_side,"Stop live wallpaper",self.stop_video)
             live_side.pack_start(Gtk.Label(label="Wallpaper music volume",xalign=0),False,False,0)
             saved=read_json(LIVE_CONFIG); self.volume=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,0,100,1); self.volume.set_value(int(saved.get("volume",65))); self.volume.set_digits(0); live_side.pack_start(self.volume,False,False,0)
+            self.volume.connect("value-changed",self.volume_changed)
             self.audio=Gtk.CheckButton(label="Enable wallpaper audio"); self.audio.set_active(bool(saved.get("audio",True))); live_side.pack_start(self.audio,False,False,0)
+            self.audio.connect("toggled",self.audio_changed)
+            self.restore_live=Gtk.CheckButton(label="Restore this live wallpaper at login")
+            self.restore_live.set_active(bool(saved.get("restore_on_login",False)))
+            self.restore_live.connect("toggled",self.restore_changed)
+            live_side.pack_start(self.restore_live,False,False,0)
             hint=Gtk.Label(label="Video loops continuously. Desktop icons and clicks remain above the video layer."); hint.set_line_wrap(True); hint.set_xalign(0); live_side.pack_start(hint,False,False,0)
             self.tabs.append_page(live_page,Gtk.Label(label="Live wallpapers + music"))
             self.status=Gtk.Label(label=str(LIBRARY)); self.status.set_xalign(0); self.status.set_line_wrap(True); root.pack_end(self.status,False,False,0)
@@ -185,14 +201,19 @@ def gui():
 
         def apply_selected(self,*_):
             if not self.selected_image: self.alert("Select an image first.",Gtk.MessageType.INFO); return
-            try: apply(self.selected_image,self.mode.get_active_id() or "zoomed"); self.status.set_text(f"Applied static wallpaper: {self.selected_image.name}")
+            try:
+                if LIVE_CONFIG.is_file(): engine("stop",check=False)
+                apply(self.selected_image,self.mode.get_active_id() or "zoomed")
+                self.status.set_text(f"Applied static wallpaper: {self.selected_image.name}")
             except WallpaperError as e: self.alert(str(e))
 
         def start_video(self,*_):
             if not self.selected_video: self.alert("Select a video first.",Gtk.MessageType.INFO); return
             try:
-                output=engine("start",self.selected_video,"--volume",int(self.volume.get_value()),*([] if self.audio.get_active() else ["--no-audio"]))
-                save(LIVE_CONFIG,{"version":1,"path":str(self.selected_video),"volume":int(self.volume.get_value()),"audio":self.audio.get_active()})
+                args=["start",self.selected_video,"--volume",int(self.volume.get_value())]
+                if not self.audio.get_active(): args.append("--no-audio")
+                if self.restore_live.get_active(): args.append("--restore-on-login")
+                output=engine(*args)
                 self.status.set_text(output)
             except WallpaperError as e: self.alert(str(e))
 
@@ -204,8 +225,30 @@ def gui():
             try: self.status.set_text(engine("restart"))
             except WallpaperError as e: self.alert(str(e))
 
+        def volume_changed(self,scale):
+            if not LIVE_CONFIG.is_file(): return
+            try:
+                engine("volume",int(scale.get_value()),check=False)
+            except WallpaperError:
+                pass
+
+        def audio_changed(self,button):
+            if not LIVE_CONFIG.is_file(): return
+            try:
+                self.status.set_text(engine("audio","on" if button.get_active() else "off"))
+            except WallpaperError:
+                pass
+
+        def restore_changed(self,button):
+            if not LIVE_CONFIG.is_file(): return
+            data=read_json(LIVE_CONFIG)
+            data["restore_on_login"]=button.get_active()
+            save(LIVE_CONFIG,data)
+
         def stop_video(self,*_):
-            try: self.status.set_text(engine("stop"))
+            try:
+                engine("stop")
+                self.status.set_text("Live wallpaper stopped • XFCE desktop icons restored")
             except WallpaperError as e: self.alert(str(e))
 
     Main().show_all(); Gtk.main(); return 0

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Click-through MPV live wallpaper backend for a single-monitor XFCE desktop.
+"""XFCE live wallpaper controller using a desktop-layer X11 window.
 
-The player is embedded in xfdesktop's desktop window, then lowered beneath
-its icon-view child windows. XFixes gives the video child an empty input
-shape so pointer events continue to reach desktop icons.
+Video is rendered by MPV inside an XWinWrap window typed as DESKTOP.
+XFCE's native icon view is temporarily hidden while a transparent GTK icon
+overlay is shown above the video and below normal application windows.
+All XFCE icon settings are restored on stop and on recovery.
 """
 import argparse
-import ctypes
-import ctypes.util
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -17,12 +17,25 @@ import time
 from pathlib import Path
 
 HOME = Path.home()
+APP = HOME / ".local/share/wallpaper-control-centre"
+ENGINE = Path(__file__).resolve()
+ICON_OVERLAY = APP / "desktop_icons.py"
+BIN = APP / "xwinwrap"
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/runtime-{os.environ.get('USER', 'prime')}"))
 RUNTIME.mkdir(parents=True, exist_ok=True)
+try:
+    if RUNTIME.stat().st_uid == os.getuid():
+        RUNTIME.chmod(0o700)
+except OSError:
+    pass
 IPC = RUNTIME / "wallpaper-control-centre-mpv.sock"
 META = HOME / ".config/wallpaper-control-centre/live.json"
+LOG_DIR = HOME / ".cache/wallpaper-control-centre"
+LOG = LOG_DIR / "live-wallpaper.log"
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".ogv"}
 MAX_VOLUME = 100
+CHANNEL = "xfce4-desktop"
+ICON_STYLE = "/desktop-icons/style"
 
 
 class EngineError(RuntimeError):
@@ -44,90 +57,58 @@ def read_meta():
         return {}
 
 
-def desktop_window():
+def xfconf(*args, check=True):
     try:
-        from Xlib import X, display
-        from Xlib.xobject.drawable import Window
-    except ImportError as exc:
-        raise EngineError("python3-xlib is missing; install the Wallpaper Control Centre dependencies.") from exc
-
-    d = display.Display()
-    root = d.screen().root
-    atom_type = d.intern_atom("_NET_WM_WINDOW_TYPE")
-    atom_desktop = d.intern_atom("_NET_WM_WINDOW_TYPE_DESKTOP")
-    atom_current = d.intern_atom("_NET_CURRENT_DESKTOP")
-    atom_wm_desktop = d.intern_atom("_NET_WM_DESKTOP")
-    current = root.get_full_property(atom_current, X.AnyPropertyType)
-    current_desktop = int(current.value[0]) if current and len(current.value) else 0
-    matches = []
-    # Recurse because reparenting window managers (including xfwm4) may place
-    # the client desktop window below a frame window instead of directly on root.
-    pending = [(win, 0) for win in root.query_tree().children]
-    while pending:
-        win, depth = pending.pop()
-        try:
-            prop = win.get_full_property(atom_type, X.AnyPropertyType)
-            if prop and atom_desktop in list(prop.value):
-                geom = win.get_geometry()
-                if geom.width >= 320 and geom.height >= 240:
-                    desk = win.get_full_property(atom_wm_desktop, X.AnyPropertyType)
-                    desk_id = int(desk.value[0]) if desk and len(desk.value) else 0xFFFFFFFF
-                    if desk_id in (current_desktop, 0xFFFFFFFF):
-                        matches.append((geom.width * geom.height, win.id, geom.width, geom.height))
-            if depth < 5:
-                pending.extend((child, depth + 1) for child in win.query_tree().children)
-        except Exception:
-            continue
-    if not matches:
-        d.close()
-        raise EngineError("Could not identify the active XFCE desktop window. No window was changed.")
-    matches.sort(reverse=True)
-    # Termux:X11 on PrimeBook is a single-monitor desktop. Refuse ambiguous
-    # equal-sized desktop windows rather than putting video on the wrong one.
-    largest = matches[0]
-    if len(matches) > 1 and matches[1][0] == largest[0]:
-        d.close()
-        raise EngineError("Multiple equal-sized XFCE desktop windows were found; refusing an ambiguous live-wallpaper target.")
-    return d, root, d.create_resource_object("window", largest[1]), (largest[2], largest[3])
+        result = subprocess.run(["xfconf-query", "-c", CHANNEL, *args],
+                                text=True, capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise EngineError(f"Cannot communicate with XFCE settings: {exc}") from exc
+    if check and result.returncode:
+        raise EngineError((result.stderr or result.stdout).strip() or "XFCE settings command failed.")
+    return result
 
 
-def set_click_through(window_id):
-    lib_name = ctypes.util.find_library("Xfixes")
-    x11_name = ctypes.util.find_library("X11")
-    if not lib_name or not x11_name:
-        raise EngineError("XFixes/X11 client libraries are missing; click-through safety cannot be guaranteed.")
-    x11 = ctypes.CDLL(x11_name)
-    fixes = ctypes.CDLL(lib_name)
-    x11.XOpenDisplay.restype = ctypes.c_void_p
-    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-    x11.XFlush.argtypes = [ctypes.c_void_p]
-    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-    fixes.XFixesQueryExtension.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
-    fixes.XFixesQueryExtension.restype = ctypes.c_int
-    fixes.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-    fixes.XFixesCreateRegion.restype = ctypes.c_ulong
-    fixes.XFixesSetWindowShapeRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
-    fixes.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-    display_name = os.environ.get("DISPLAY", "").encode() or None
-    conn = x11.XOpenDisplay(display_name)
-    if not conn:
-        raise EngineError("Cannot open the active X11 display.")
+def get_icon_style():
+    result = xfconf("-p", ICON_STYLE, check=False)
+    if result.returncode:
+        # Some clean XFCE profiles have not materialized this property yet.
+        return 2
     try:
-        event_base, error_base = ctypes.c_int(), ctypes.c_int()
-        if not fixes.XFixesQueryExtension(conn, ctypes.byref(event_base), ctypes.byref(error_base)):
-            raise EngineError("The X server does not provide XFixes; refusing to create a window that could block desktop clicks.")
-        # Create a genuinely empty XFixes region. Passing None here resets
-        # the shape on some XFixes implementations and is NOT click-through.
-        empty = fixes.XFixesCreateRegion(conn, None, 0)
-        if not empty:
-            raise EngineError("XFixes could not allocate an empty input region.")
-        try:
-            fixes.XFixesSetWindowShapeRegion(conn, ctypes.c_ulong(window_id), 2, 0, 0, empty)
-            x11.XFlush(conn)
-        finally:
-            fixes.XFixesDestroyRegion(conn, empty)
-    finally:
-        x11.XCloseDisplay(conn)
+        return int(result.stdout.strip())
+    except ValueError as exc:
+        raise EngineError("XFCE returned an invalid desktop icon style.") from exc
+
+
+def set_icon_style(value):
+    xfconf("-p", ICON_STYLE, "--create", "-t", "int", "-s", str(int(value)))
+
+
+def group_alive(pgid):
+    try:
+        os.killpg(int(pgid), 0)
+        return True
+    except (ProcessLookupError, ValueError):
+        return False
+    except PermissionError:
+        return True
+
+
+def terminate_group(pid, seconds=3):
+    if not pid or int(pid) <= 1:
+        return
+    try:
+        os.killpg(int(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not group_alive(pid):
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(int(pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def mpv_command(command, timeout=2.0):
@@ -153,130 +134,220 @@ def get_property(name):
     return mpv_command(["get_property", name])
 
 
-def start(path, volume=65, audio=True):
+def recover_stale_state(data=None):
+    data = data or read_meta()
+    # Retire any prior MPV instance first, including early v1 metadata that
+    # the GUI accidentally overwrote and therefore no longer contains a PID.
+    try:
+        if IPC.exists(): mpv_command(["quit"])
+    except EngineError:
+        pass
+    # If the last session died before cleanup, bring XFCE's native icons back.
+    if data.get("managed_icons") and data.get("original_icon_style") is not None:
+        if get_icon_style() == 0:
+            set_icon_style(data["original_icon_style"])
+    # Version 1 of this app stored the direct MPV PID as "pid".
+    # Retire that legacy player as part of the backend migration.
+    if data.get("pid"):
+        try:
+            if IPC.exists(): mpv_command(["quit"])
+        except EngineError:
+            pass
+        terminate_group(data.get("pid"))
+    terminate_group(data.get("overlay_pid"))
+    terminate_group(data.get("wallpaper_pid"))
+    IPC.unlink(missing_ok=True)
+
+
+def stop(clear_state=True):
+    data = read_meta()
+    try:
+        if IPC.exists():
+            mpv_command(["quit"])
+    except EngineError:
+        pass
+    terminate_group(data.get("wallpaper_pid"), 3)
+    terminate_group(data.get("overlay_pid"), 2)
+    terminate_group(data.get("pid"), 2)  # Legacy direct-MPV process from v1.
+    IPC.unlink(missing_ok=True)
+    if data.get("managed_icons") and data.get("original_icon_style") is not None:
+        # Do not overwrite a deliberate user change made while the wallpaper ran.
+        if get_icon_style() == 0:
+            set_icon_style(data["original_icon_style"])
+    if clear_state:
+        META.unlink(missing_ok=True)
+    return True
+
+
+def start(path, volume=65, audio=True, restore_on_login=False):
     path = Path(path).expanduser().resolve()
     if not path.is_file() or path.suffix.lower() not in VIDEO_EXTS:
         raise EngineError("Choose a supported video: MP4, MKV, WEBM, MOV, AVI, M4V or OGV.")
-    if IPC.exists():
-        try:
-            get_property("path")
-            mpv_command(["quit"])
-            time.sleep(0.25)
-        except EngineError:
-            pass
-        IPC.unlink(missing_ok=True)
+    if not BIN.is_file() or not os.access(BIN, os.X_OK):
+        raise EngineError("The X11 wallpaper helper is not installed. Re-run the Wallpaper Control Centre installer.")
+    if not shutil_which("mpv"):
+        raise EngineError("MPV is not installed.")
+    if not shutil_which("xfconf-query"):
+        raise EngineError("xfconf-query is not installed.")
+    if not ICON_OVERLAY.is_file():
+        raise EngineError("The desktop icon overlay is missing. Re-run the installer.")
 
-    d, root, parent, size = desktop_window()
-    before = {child.id for child in parent.query_tree().children}
-    width, height = size
-    cmd = [
-        "mpv", "--no-config", "--vo=x11", f"--wid={parent.id}",
-        "--force-window=yes", "--idle=no", "--keep-open=no",
-        "--loop-file=inf", "--no-border", "--osc=no", "--osd-level=0",
-        "--input-default-bindings=no", "--input-vo-keyboard=no",
-        "--input-cursor=no", "--cursor-autohide=always",
-        "--audio-display=no", f"--volume={max(0, min(MAX_VOLUME, int(volume)))}",
-        f"--mute={'no' if audio else 'yes'}",
-        f"--input-ipc-server={IPC}", str(path)
-    ]
+    old = read_meta()
+    recover_stale_state(old)
+    style = get_icon_style()
+    if style == 1:
+        raise EngineError("XFCE is set to show minimized-application icons. Switch Desktop → Icons → Icon type to File/launcher icons or None before using live wallpapers.")
+    if style not in (0, 2):
+        raise EngineError(f"Unsupported XFCE desktop icon mode: {style}. No settings were changed.")
+
+    volume = max(0, min(MAX_VOLUME, int(volume)))
+    managed_icons = style == 2
+    overlay = None
+    wallpaper = None
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_handle = LOG.open("ab", buffering=0)
     try:
-        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, start_new_session=True,
-                                close_fds=True)
-    except FileNotFoundError as exc:
-        d.close()
-        raise EngineError("MPV is not installed. Install the live-wallpaper dependencies first.") from exc
+        if managed_icons:
+            # Native xfdesktop icon view and the overlay must never be shown together.
+            set_icon_style(0)
+            time.sleep(0.35)
 
-    child = None
-    deadline = time.monotonic() + 12
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            break
-        try:
-            d.sync()
-            children = [c for c in parent.query_tree().children if c.id not in before]
-            if children:
-                # MPV creates its embedded video window as a child of xfdesktop.
-                child = children[-1]
-                break
-        except Exception:
-            pass
-        time.sleep(0.1)
+        adapter = 'wid="$1"; shift; exec mpv --wid="$wid" "$@"'
+        command = [
+            str(BIN), "-fdt", "-ni", "-fs", "-un", "-s", "-st", "-sp", "-b", "-nf", "--",
+            "/bin/sh", "-c", adapter, "wallpaper-control-centre", "WID",
+            "--no-config", "--vo=x11", "--force-window=yes", "--no-border",
+            "--osc=no", "--osd-level=0", "--input-default-bindings=no",
+            "--input-vo-keyboard=no", "--cursor-autohide=always",
+            "--audio-display=no", "--loop-file=inf",
+            f"--volume={volume}", f"--mute={'no' if audio else 'yes'}",
+            f"--input-ipc-server={IPC}", str(path)
+        ]
+        wallpaper = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                     stdout=log_handle, stderr=log_handle,
+                                     start_new_session=True, close_fds=True)
+        # Wait for MPV IPC to become available; fail closed if XWinWrap/MPV exits.
+        deadline = time.monotonic() + 18
+        while time.monotonic() < deadline:
+            if wallpaper.poll() is not None:
+                raise EngineError(f"XWinWrap exited early (status {wallpaper.returncode}). See {LOG}")
+            if IPC.exists():
+                try:
+                    get_property("path")
+                    break
+                except EngineError:
+                    pass
+            time.sleep(0.2)
+        else:
+            raise EngineError(f"MPV did not become ready. See {LOG}")
 
-    if child is None:
-        proc.terminate()
-        d.close()
+        if managed_icons:
+            overlay = subprocess.Popen([sys.executable, str(ICON_OVERLAY)],
+                                       stdin=subprocess.DEVNULL, stdout=log_handle,
+                                       stderr=log_handle, start_new_session=True,
+                                       close_fds=True)
+            time.sleep(0.8)
+            if overlay.poll() is not None:
+                raise EngineError(f"Desktop icon overlay exited (status {overlay.returncode}). See {LOG}")
+
+        atomic_json(META, {
+            "version": 2, "path": str(path), "volume": volume, "audio": bool(audio),
+            "wallpaper_pid": wallpaper.pid, "overlay_pid": overlay.pid if overlay else None,
+            "original_icon_style": style, "managed_icons": managed_icons,
+            "started": int(time.time()), "restore_on_login": bool(restore_on_login),
+            "backend": "xwinwrap-mpv-desktop-layer"
+        })
+        return wallpaper.pid
+    except Exception:
+        if overlay:
+            terminate_group(overlay.pid)
+        if wallpaper:
+            terminate_group(wallpaper.pid)
         IPC.unlink(missing_ok=True)
-        raise EngineError("MPV did not create an embedded video window inside xfdesktop.")
-    try:
-        # Keep the video above the desktop's painted background but below
-        # xfdesktop's icon-view child windows.
-        child.configure(stack_mode=1)  # X.Below
-        d.sync()
-        set_click_through(child.id)
-    except Exception as exc:
-        try:
-            mpv_command(["quit"])
-        except Exception:
-            proc.terminate()
-        d.close()
-        IPC.unlink(missing_ok=True)
-        if isinstance(exc, EngineError):
-            raise
-        raise EngineError(f"Could not safely layer the live wallpaper: {exc}") from exc
-    d.close()
-    atomic_json(META, {"version": 1, "path": str(path), "volume": max(0, min(MAX_VOLUME, int(volume))),
-                       "audio": bool(audio), "pid": proc.pid, "started": int(time.time())})
-    return proc.pid
+        if managed_icons and get_icon_style() == 0:
+            set_icon_style(style)
+        raise
+    finally:
+        log_handle.close()
 
 
-def stop():
-    try:
-        mpv_command(["quit"])
-    except EngineError:
-        pass
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and IPC.exists():
-        time.sleep(0.1)
-    IPC.unlink(missing_ok=True)
+def shutil_which(name):
+    from shutil import which
+    return which(name)
+
+
+def restore():
+    data = read_meta()
+    path = Path(data.get("path", "")).expanduser()
+    if not path.is_file():
+        return False
+    start(path, data.get("volume", 65), data.get("audio", True))
     return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description="XFCE click-through live wallpaper engine")
+    parser = argparse.ArgumentParser(description="XFCE live wallpaper controller")
     sub = parser.add_subparsers(dest="action", required=True)
-    p = sub.add_parser("start"); p.add_argument("video"); p.add_argument("--volume", type=int, default=65); p.add_argument("--no-audio", action="store_true")
-    sub.add_parser("stop"); sub.add_parser("pause"); sub.add_parser("resume"); sub.add_parser("toggle")
-    sub.add_parser("restart"); sub.add_parser("status")
-    p = sub.add_parser("volume"); p.add_argument("value", type=int)
-    p = sub.add_parser("audio"); p.add_argument("state", choices=("on", "off", "toggle"))
+    p = sub.add_parser("start")
+    p.add_argument("video")
+    p.add_argument("--volume", type=int, default=65)
+    p.add_argument("--no-audio", action="store_true")
+    p.add_argument("--restore-on-login", action="store_true")
+    sub.add_parser("stop")
+    sub.add_parser("pause")
+    sub.add_parser("resume")
+    sub.add_parser("toggle")
+    sub.add_parser("restart")
+    sub.add_parser("status")
+    p = sub.add_parser("volume")
+    p.add_argument("value", type=int)
+    p = sub.add_parser("audio")
+    p.add_argument("state", choices=("on", "off", "toggle"))
+    sub.add_parser("restore")
     args = parser.parse_args()
     try:
         if args.action == "start":
-            pid = start(args.video, args.volume, not args.no_audio)
-            print(f"Live wallpaper started (MPV PID {pid}).")
+            pid = start(args.video, args.volume, not args.no_audio, args.restore_on_login)
+            print(f"Live wallpaper started (PID {pid}).")
         elif args.action == "stop":
-            stop(); print("Live wallpaper stopped.")
-        elif args.action == "pause": mpv_command(["set_property", "pause", True]); print("Paused.")
-        elif args.action == "resume": mpv_command(["set_property", "pause", False]); print("Playing.")
+            stop()
+            print("Live wallpaper stopped; XFCE desktop icons restored.")
+        elif args.action == "restore":
+            if restore():
+                print("Live wallpaper restored.")
+            else:
+                print("No saved live wallpaper.")
+        elif args.action == "pause":
+            mpv_command(["set_property", "pause", True]); print("Paused.")
+        elif args.action == "resume":
+            mpv_command(["set_property", "pause", False]); print("Playing.")
         elif args.action == "toggle":
-            paused = bool(get_property("pause")); mpv_command(["set_property", "pause", not paused]); print("Paused." if not paused else "Playing.")
-        elif args.action == "restart": mpv_command(["seek", 0, "absolute"]); mpv_command(["set_property", "pause", False]); print("Restarted.")
+            paused = bool(get_property("pause"))
+            mpv_command(["set_property", "pause", not paused])
+            print("Paused." if not paused else "Playing.")
+        elif args.action == "restart":
+            mpv_command(["seek", 0, "absolute"]); mpv_command(["set_property", "pause", False]); print("Restarted.")
         elif args.action == "volume":
-            value = max(0, min(MAX_VOLUME, args.value)); mpv_command(["set_property", "volume", value]); print(f"Volume: {value}%")
-            meta=read_meta(); meta["volume"]=value; atomic_json(META,meta)
+            value = max(0, min(MAX_VOLUME, args.value))
+            mpv_command(["set_property", "volume", value])
+            data = read_meta(); data["volume"] = value; atomic_json(META, data)
+            print(f"Volume: {value}%")
         elif args.action == "audio":
             muted = bool(get_property("mute"))
             target = not muted if args.state == "toggle" else args.state == "off"
-            mpv_command(["set_property", "mute", target]); print("Audio enabled." if not target else "Audio muted.")
-            meta=read_meta(); meta["audio"]=not target; atomic_json(META,meta)
+            mpv_command(["set_property", "mute", target])
+            data = read_meta(); data["audio"] = not target; atomic_json(META, data)
+            print("Audio muted." if target else "Audio enabled.")
         elif args.action == "status":
-            print(json.dumps({"path": get_property("path"), "pause": get_property("pause"),
-                              "volume": get_property("volume"), "mute": get_property("mute"),
-                              "duration": get_property("duration"), "time_pos": get_property("time-pos")}, indent=2))
+            print(json.dumps({
+                "path": get_property("path"), "pause": get_property("pause"),
+                "volume": get_property("volume"), "mute": get_property("mute"),
+                "duration": get_property("duration"), "time_pos": get_property("time-pos")
+            }, indent=2))
         return 0
     except EngineError as exc:
-        print(f"Live wallpaper: {exc}", file=sys.stderr); return 1
+        print(f"Live wallpaper: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
