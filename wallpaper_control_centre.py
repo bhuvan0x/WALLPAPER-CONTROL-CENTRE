@@ -76,7 +76,7 @@ def gui():
             side.pack_start(Gtk.Label(label="Display mode",xalign=0),False,False,0); self.mode=Gtk.ComboBoxText()
             for key,label in [("zoomed","Zoom / Fill"),("scaled","Scale / Fit"),("stretched","Stretch"),("centered","Center"),("tiled","Tile"),("spanned","Span")]: self.mode.append(key,label)
             self.mode.set_active_id(state().get("mode","zoomed")); side.pack_start(self.mode,False,False,0)
-            for label,callback in [("＋  Add wallpaper",self.add),("Set as desktop wallpaper",self.apply_selected),("Refresh library",lambda *_:self.refresh())]:
+            for label,callback in [("＋  Add wallpaper",self.on_add_wallpaper),("Set as desktop wallpaper",self.apply_selected),("Refresh library",lambda *_:self.refresh())]:
                 button=Gtk.Button(label=label); button.connect("clicked",callback); side.pack_start(button,False,False,0)
             self.status=Gtk.Label(label=str(LIBRARY)); self.status.set_xalign(0); self.status.set_line_wrap(True); root.pack_end(self.status,False,False,0)
             self.refresh(); self.connect("destroy",Gtk.main_quit)
@@ -96,7 +96,7 @@ def gui():
             self.info.set_text(self.selected.name)
         def alert(self,message,kind=Gtk.MessageType.ERROR):
             d=Gtk.MessageDialog(transient_for=self,flags=Gtk.DialogFlags.MODAL,message_type=kind,buttons=Gtk.ButtonsType.CLOSE,text=message); d.run(); d.destroy()
-        def add(self,*_):
+        def on_add_wallpaper(self,*_):
             d=Gtk.FileChooserDialog(title="Add wallpaper",parent=self,action=Gtk.FileChooserAction.OPEN); d.add_buttons("Cancel",Gtk.ResponseType.CANCEL,"Add",Gtk.ResponseType.ACCEPT)
             f=Gtk.FileFilter(); f.set_name("Images")
             for pattern in ("*.png","*.jpg","*.jpeg","*.webp","*.bmp","*.gif"): f.add_pattern(pattern)
