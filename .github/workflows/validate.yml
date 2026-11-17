@@ -2,19 +2,23 @@ name: Validate Wallpaper Control Centre
 
 on:
   push:
-    branches: [main, feat/live-wallpaper-engine]
+    branches: [main, feat/live-wallpaper-engine, fix/xfce-live-wallpaper-icon-layer]
   pull_request:
     branches: [main]
 
 jobs:
-  syntax:
+  syntax-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - name: Install X11 build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrender-dev
       - name: Compile Python sources
-        run: python -m compileall -q wallpaper_control_centre.py live_wallpaper_engine.py
+        run: python -m compileall -q wallpaper_control_centre.py live_wallpaper_engine.py desktop_icons.py
+      - name: Build XWinWrap for CI architecture
+        run: cc -O2 -Wall -Wextra vendor/xwinwrap/xwinwrap.c -o /tmp/xwinwrap -lX11 -lXext -lXrender
       - name: Validate installer shell syntax
         run: bash -n install.sh
