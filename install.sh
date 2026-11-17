@@ -4,11 +4,13 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP="$HOME/.local/share/wallpaper-control-centre"
 mkdir -p "$APP" "$HOME/.local/bin" "$HOME/.config/autostart" "$HOME/Pictures/Wallpapers"
 install -m 0644 "$ROOT/wallpaper_control_centre.py" "$APP/wallpaper_control_centre.py"
+
 cat > "$HOME/.local/bin/wallpaper-control-centre" <<'LAUNCH'
 #!/usr/bin/env bash
 exec /usr/bin/python3 "$HOME/.local/share/wallpaper-control-centre/wallpaper_control_centre.py" "$@"
 LAUNCH
 chmod 0755 "$HOME/.local/bin/wallpaper-control-centre"
+
 cat > "$HOME/.local/share/applications/wallpaper-control-centre.desktop" <<'APP'
 [Desktop Entry]
 Type=Application
@@ -20,6 +22,7 @@ Categories=Settings;DesktopSettings;
 StartupNotify=true
 Terminal=false
 APP
+
 cat > "$HOME/.local/bin/wallpaper-control-centre-restore" <<'RESTORE'
 #!/usr/bin/env bash
 set -u
@@ -31,11 +34,8 @@ echo "[$(date -Is)] Wallpaper restore hook started."
 # Wait until XFCE desktop and its wallpaper channel are fully initialized.
 ready=0
 for attempt in $(seq 1 45); do
-  if pgrep -u "$(id -u)" -x xfdesktop >/dev/null 2>&1 \
-    && /usr/bin/xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -q '/last-image
-echo "Installed. Run wallpaper-control-centre to manage your library."
-echo "Library: $HOME/Pictures/Wallpapers"
-; then
+  if pgrep -u "$(id -u)" -x xfdesktop >/dev/null 2>&1 &&
+     /usr/bin/xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -q '/last-image$'; then
     ready=1
     break
   fi
@@ -56,6 +56,7 @@ echo "[$(date -Is)] Restore finished with status $status."
 exit "$status"
 RESTORE
 chmod 0755 "$HOME/.local/bin/wallpaper-control-centre-restore"
+
 cat > "$HOME/.config/autostart/wallpaper-control-centre-restore.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
@@ -68,5 +69,6 @@ StartupNotify=false
 Terminal=false
 Hidden=false
 DESKTOP
+
 echo "Installed. Run wallpaper-control-centre to manage your library."
 echo "Library: $HOME/Pictures/Wallpapers"
