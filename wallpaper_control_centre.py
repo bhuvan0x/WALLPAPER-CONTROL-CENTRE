@@ -201,7 +201,10 @@ def gui():
 
         def apply_selected(self,*_):
             if not self.selected_image: self.alert("Select an image first.",Gtk.MessageType.INFO); return
-            try: apply(self.selected_image,self.mode.get_active_id() or "zoomed"); self.status.set_text(f"Applied static wallpaper: {self.selected_image.name}")
+            try:
+                if LIVE_CONFIG.is_file(): engine("stop",check=False)
+                apply(self.selected_image,self.mode.get_active_id() or "zoomed")
+                self.status.set_text(f"Applied static wallpaper: {self.selected_image.name}")
             except WallpaperError as e: self.alert(str(e))
 
         def start_video(self,*_):
