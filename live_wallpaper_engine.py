@@ -101,8 +101,7 @@ def set_click_through(window_id):
     x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
     fixes.XFixesQueryExtension.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
     fixes.XFixesQueryExtension.restype = ctypes.c_int
-    fixes.XFixesSetWindowShapeRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
-    display_name = os.environ.get("DISPLAY", "").encode() or None
+    fixes.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]\n    fixes.XFixesCreateRegion.restype = ctypes.c_ulong\n    fixes.XFixesSetWindowShapeRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]\n    fixes.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]\n    display_name = os.environ.get("DISPLAY", "").encode() or None
     conn = x11.XOpenDisplay(display_name)
     if not conn:
         raise EngineError("Cannot open the active X11 display.")
@@ -110,9 +109,16 @@ def set_click_through(window_id):
         event_base, error_base = ctypes.c_int(), ctypes.c_int()
         if not fixes.XFixesQueryExtension(conn, ctypes.byref(event_base), ctypes.byref(error_base)):
             raise EngineError("The X server does not provide XFixes; refusing to create a window that could block desktop clicks.")
-        # ShapeInput is 2; region 0 means an empty input region.
-        fixes.XFixesSetWindowShapeRegion(conn, ctypes.c_ulong(window_id), 2, 0, 0, 0)
-        x11.XFlush(conn)
+        # Create a genuinely empty XFixes region. Passing None here resets
+        # the shape on some XFixes implementations and is NOT click-through.
+        empty = fixes.XFixesCreateRegion(conn, None, 0)
+        if not empty:
+            raise EngineError("XFixes could not allocate an empty input region.")
+        try:
+            fixes.XFixesSetWindowShapeRegion(conn, ctypes.c_ulong(window_id), 2, 0, 0, empty)
+            x11.XFlush(conn)
+        finally:
+            fixes.XFixesDestroyRegion(conn, empty)
     finally:
         x11.XCloseDisplay(conn)
 
@@ -198,7 +204,6 @@ def start(path, volume=65, audio=True):
     try:
         # Keep the video above the desktop's painted background but below
         # xfdesktop's icon-view child windows.
-        child.configure(stack_mode=0)  # X.Above is not used; explicit lower below.
         child.configure(stack_mode=1)  # X.Below
         d.sync()
         set_click_through(child.id)
