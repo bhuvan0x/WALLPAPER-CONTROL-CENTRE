@@ -9,6 +9,9 @@ and that both that copyright notice and this permission notice
 appear in supporting documentation, and that the name of
 Novell, Inc. not be used in advertising or publicity pertaining to
 distribution without specific, written prior permission.
+Novell, Inc. makes no representations about the suitability of
+this software for any purpose. It is provided "as is" without express
+or implied warranty.
 
 NOVELL, INC. DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
 INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN
@@ -18,4 +21,5 @@ OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
 NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
 WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+Original author: David Reveman <davidr@novell.com>
 Upstream: https://github.com/mmhobi7/xwinwrap
