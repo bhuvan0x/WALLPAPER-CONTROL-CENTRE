@@ -145,6 +145,7 @@ def gui():
             self.audio.connect("toggled",self.audio_changed)
             self.restore_live=Gtk.CheckButton(label="Restore this live wallpaper at login")
             self.restore_live.set_active(bool(saved.get("restore_on_login",False)))
+            self.restore_live.connect("toggled",self.restore_changed)
             live_side.pack_start(self.restore_live,False,False,0)
             hint=Gtk.Label(label="Video loops continuously. Desktop icons and clicks remain above the video layer."); hint.set_line_wrap(True); hint.set_xalign(0); live_side.pack_start(hint,False,False,0)
             self.tabs.append_page(live_page,Gtk.Label(label="Live wallpapers + music"))
@@ -234,6 +235,12 @@ def gui():
                 self.status.set_text(engine("audio","on" if button.get_active() else "off"))
             except WallpaperError:
                 pass
+
+        def restore_changed(self,button):
+            if not LIVE_CONFIG.is_file(): return
+            data=read_json(LIVE_CONFIG)
+            data["restore_on_login"]=button.get_active()
+            save(LIVE_CONFIG,data)
 
         def stop_video(self,*_):
             try:
