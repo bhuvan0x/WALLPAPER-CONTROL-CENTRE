@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Static and live wallpaper manager for XFCE / Termux:X11."""
-import argparse, json, os, shutil, subprocess, sys, uuid
+import argparse, json, os, shutil, subprocess, sys, uuid, threading
 from pathlib import Path
+from video_optimizer import optimize_video, OptimizerError
 
 HOME=Path.home(); LIBRARY=HOME/"Pictures"/"Wallpapers"
 CONFIG=HOME/".config"/"wallpaper-control-centre"/"state.json"
@@ -102,13 +103,13 @@ def gui():
     try:
         import gi
         gi.require_version("Gtk","3.0")
-        from gi.repository import Gtk,GdkPixbuf
+        from gi.repository import Gtk,GdkPixbuf,GLib
     except Exception as e: print(f"GTK 3 / PyGObject unavailable: {e}",file=sys.stderr); return 2
 
     class Main(Gtk.Window):
         def __init__(self):
             super().__init__(title="Wallpaper Control Centre"); self.set_default_size(1020,650); self.set_border_width(18)
-            self.selected_image=None; self.selected_video=None
+            self.selected_image=None; self.selected_video=None; self.optimizing=False
             root=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=12); self.add(root)
             title=Gtk.Label(); title.set_markup("<span size='xx-large' weight='bold'>Wallpaper Control Centre</span>"); title.set_xalign(0); root.pack_start(title,False,False,0)
             note=Gtk.Label(label="Your desktop, your atmosphere — static images, live video and soundtrack."); note.set_xalign(0); root.pack_start(note,False,False,0)
@@ -134,6 +135,16 @@ def gui():
             live_side=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=10); live_side.set_size_request(270,-1); live_page.pack_start(live_side,False,False,0)
             self.video_info=Gtk.Label(label="Select a video wallpaper"); self.video_info.set_line_wrap(True); self.video_info.set_xalign(0); live_side.pack_start(self.video_info,False,False,0)
             self.add_button(live_side,"＋  Add video",self.add_video)
+            self.optimize_button=self.add_button(live_side,"Optimize selected MP4",self.optimize_selected)
+            self.auto_optimize=Gtk.CheckButton(label="Automatically optimize MP4s when added")
+            self.auto_optimize.set_active(bool(read_json(OPTIMIZER_CONFIG).get("auto_optimize",False)))
+            self.auto_optimize.connect("toggled",self.auto_optimize_changed)
+            live_side.pack_start(self.auto_optimize,False,False,0)
+            optimize_hint=Gtk.Label(label="Creates a separate H.264/AAC copy: max 1080p, up to 30 FPS. Original files are never overwritten.")
+            optimize_hint.set_line_wrap(True); optimize_hint.set_xalign(0); live_side.pack_start(optimize_hint,False,False,0)
+            self.optimize_progress=Gtk.ProgressBar(); self.optimize_progress.set_show_text(True)
+            self.optimize_progress.set_text("Optimization progress")
+            live_side.pack_start(self.optimize_progress,False,False,0)
             self.add_button(live_side,"Start / apply live wallpaper",self.start_video)
             self.add_button(live_side,"Pause / resume",self.toggle_pause)
             self.add_button(live_side,"Restart video",self.restart_video)
@@ -153,7 +164,58 @@ def gui():
             self.refresh(); self.connect("destroy",Gtk.main_quit)
 
         def add_button(self,parent,label,callback):
-            button=Gtk.Button(label=label); button.connect("clicked",callback); parent.pack_start(button,False,False,0)
+            button=Gtk.Button(label=label); button.connect("clicked",callback); parent.pack_start(button,False,False,0); return button
+
+        def auto_optimize_changed(self,button):
+            save(OPTIMIZER_CONFIG,{"version":1,"auto_optimize":button.get_active()})
+
+        def optimize_selected(self,*_):
+            if not self.selected_video:
+                self.alert("Select an MP4 video first.",Gtk.MessageType.INFO); return
+            self.start_optimization(self.selected_video)
+
+        def start_optimization(self,path):
+            path=Path(path).expanduser().resolve()
+            if path.suffix.lower()!=".mp4":
+                self.alert("The optimizer currently accepts MP4 files only.",Gtk.MessageType.INFO); return
+            if self.optimizing:
+                self.alert("An optimization job is already running.",Gtk.MessageType.INFO); return
+            if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+                self.alert("FFmpeg and FFprobe are required. Update the Termux-Debian-X11 setup repository and rerun its installer."); return
+            self.optimizing=True; self.optimize_button.set_sensitive(False)
+            self.status.set_text(f"Optimizing {path.name}… This may take a while on the PrimeBook.")
+            def worker():
+                try:
+                    result=optimize_video(path,LIBRARY,progress=lambda value: GLib.idle_add(self.update_optimization_progress,value))
+                    GLib.idle_add(self.optimization_finished,result,None)
+                except (OptimizerError,OSError) as exc:
+                    GLib.idle_add(self.optimization_finished,None,str(exc))
+            threading.Thread(target=worker,name="wallpaper-mp4-optimizer",daemon=True).start()
+
+        def update_optimization_progress(self,value):
+            self.optimize_progress.set_fraction(value/100.0)
+            self.optimize_progress.set_text(f"Encoding… {value:.0f}%")
+            return False
+
+        def optimization_finished(self,result,error):
+            self.optimizing=False; self.optimize_button.set_sensitive(True)
+            self.optimize_progress.set_fraction(0.0)
+            self.optimize_progress.set_text("Optimization progress")
+            if error:
+                self.status.set_text(f"Optimization failed: {error}")
+                self.alert(f"MP4 optimization failed:\n{error}")
+                return False
+            self.refresh()
+            self.selected_video=result["output"]
+            self.video_info.set_text(self.selected_video.name)
+            saved=result["saved_bytes"]
+            self.status.set_text(
+                f"Optimized copy: {self.selected_video.name} • {result['output_bytes']/1048576:.1f} MB • "
+                f"{result['saved_percent']:.1f}% smaller ({saved/1048576:.1f} MB saved)"
+                if saved>0 else
+                f"Optimized copy: {self.selected_video.name} • {result['output_bytes']/1048576:.1f} MB • output is not smaller"
+            )
+            return False
 
         def alert(self,message,kind=Gtk.MessageType.ERROR):
             d=Gtk.MessageDialog(transient_for=self,flags=Gtk.DialogFlags.MODAL,message_type=kind,buttons=Gtk.ButtonsType.CLOSE,text=message); d.run(); d.destroy()
@@ -173,7 +235,10 @@ def gui():
         def add_video(self,*_):
             source=self.choose_file("Add live video wallpaper",["*.mp4","*.mkv","*.webm","*.mov","*.avi","*.m4v","*.ogv"])
             if source:
-                try: p=import_media(source,VIDEO_EXTS); self.refresh(); self.status.set_text(f"Added live video: {p.name}")
+                try:
+                    p=import_media(source,VIDEO_EXTS); self.refresh(); self.status.set_text(f"Added live video: {p.name}")
+                    if self.auto_optimize.get_active() and p.suffix.lower()==".mp4":
+                        self.start_optimization(p)
                 except WallpaperError as e: self.alert(str(e))
 
         def refresh(self):

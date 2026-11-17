@@ -25,6 +25,10 @@ Features:
 - MP4, MKV, WEBM, MOV, AVI, M4V and OGV.
 - Continuous looping; pause/resume, restart and stop.
 - Soundtrack volume and mute controls apply while playback is running.
+- **MP4 optimization:** create a separate H.264/AAC playback copy (maximum 1080p, up to 30 FPS, CRF 25, fast-start MP4) without overwriting the original.
+- Optimize selected MP4s on demand, or enable **Automatically optimize MP4s when added**. This option is off by default and applies only to MP4 imports.
+- Encoding runs in the background so the GTK interface remains responsive. Failed jobs leave the original untouched.
+- Reports output size and estimated storage saved. Compression is content-dependent; an optimized copy is not guaranteed to be smaller.
 - Desktop folder changes are monitored and the icon overlay refreshes.
 - Existing XFCE icon positions are read from its saved `icons.screen0-*.rc` layout where available.
 - Video is configured below normal windows; overlay icons are non-focusable and kept below ordinary application windows.
@@ -36,7 +40,7 @@ Fresco and Lowpaper are not used or installed.
 
 ## Requirements
 
-Debian XFCE/X11, Python 3, GTK 3 / PyGObject, MPV, `xfconf-query`, C compiler, pkg-config, and X11 development libraries.
+Debian XFCE/X11, Python 3, GTK 3 / PyGObject, MPV, FFmpeg (`ffmpeg` and `ffprobe`), `xfconf-query`, C compiler, pkg-config, and X11 development libraries.
 
 For the PrimeBook Termux setup, run the parent repository installer:
 
@@ -48,7 +52,7 @@ It installs runtime and build dependencies, pulls this repository's default bran
 
     wallpaper-control-centre
 
-Open **Static wallpapers** to import and apply an image. Open **Live wallpapers + music** to add a video, start it, pause/resume, restart, stop, and control its soundtrack.
+Open **Static wallpapers** to import and apply an image. In **Live wallpapers + music**, select an MP4 and choose **Optimize selected MP4** to create a separate playback-friendly copy. Enable **Automatically optimize MP4s when added** to run this conversion after importing MP4 files. Select the optimized copy to use it as the live wallpaper.
 
 The **Restore this live wallpaper at login** option is off by default. Leave it off until the actual X11 session has passed the video/icon interaction tests on the device.
 
