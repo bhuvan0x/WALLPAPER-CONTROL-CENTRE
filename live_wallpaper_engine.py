@@ -131,6 +131,12 @@ def get_property(name):
 
 def recover_stale_state(data=None):
     data = data or read_meta()
+    # Retire any prior MPV instance first, including early v1 metadata that
+    # the GUI accidentally overwrote and therefore no longer contains a PID.
+    try:
+        if IPC.exists(): mpv_command(["quit"])
+    except EngineError:
+        pass
     # If the last session died before cleanup, bring XFCE's native icons back.
     if data.get("managed_icons") and data.get("original_icon_style") is not None:
         if get_icon_style() == 0:
