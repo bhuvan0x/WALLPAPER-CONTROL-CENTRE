@@ -135,6 +135,14 @@ def recover_stale_state(data=None):
     if data.get("managed_icons") and data.get("original_icon_style") is not None:
         if get_icon_style() == 0:
             set_icon_style(data["original_icon_style"])
+    # Version 1 of this app stored the direct MPV PID as "pid".
+    # Retire that legacy player as part of the backend migration.
+    if data.get("pid"):
+        try:
+            if IPC.exists(): mpv_command(["quit"])
+        except EngineError:
+            pass
+        terminate_group(data.get("pid"))
     terminate_group(data.get("overlay_pid"))
     terminate_group(data.get("wallpaper_pid"))
     IPC.unlink(missing_ok=True)
@@ -149,6 +157,7 @@ def stop(clear_state=True):
         pass
     terminate_group(data.get("wallpaper_pid"), 3)
     terminate_group(data.get("overlay_pid"), 2)
+    terminate_group(data.get("pid"), 2)  # Legacy direct-MPV process from v1.
     IPC.unlink(missing_ok=True)
     if data.get("managed_icons") and data.get("original_icon_style") is not None:
         # Do not overwrite a deliberate user change made while the wallpaper ran.
