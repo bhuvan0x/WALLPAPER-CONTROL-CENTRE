@@ -104,7 +104,11 @@ def set_click_through(window_id):
     x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
     fixes.XFixesQueryExtension.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
     fixes.XFixesQueryExtension.restype = ctypes.c_int
-    fixes.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]\n    fixes.XFixesCreateRegion.restype = ctypes.c_ulong\n    fixes.XFixesSetWindowShapeRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]\n    fixes.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]\n    display_name = os.environ.get("DISPLAY", "").encode() or None
+    fixes.XFixesCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    fixes.XFixesCreateRegion.restype = ctypes.c_ulong
+    fixes.XFixesSetWindowShapeRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+    fixes.XFixesDestroyRegion.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    display_name = os.environ.get("DISPLAY", "").encode() or None
     conn = x11.XOpenDisplay(display_name)
     if not conn:
         raise EngineError("Cannot open the active X11 display.")
