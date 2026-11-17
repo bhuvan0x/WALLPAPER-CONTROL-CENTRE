@@ -3,7 +3,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP="$HOME/.local/share/wallpaper-control-centre"
 mkdir -p "$APP" "$HOME/.local/bin" "$HOME/.config/autostart" "$HOME/Pictures/Wallpapers"
-install -m 0644 "$ROOT/wallpaper_control_centre.py" "$APP/wallpaper_control_centre.py"
+install -m 0644 "$ROOT/wallpaper_control_centre.py" "$APP/wallpaper_control_centre.py"\ninstall -m 0644 "$ROOT/live_wallpaper_engine.py" "$APP/live_wallpaper_engine.py"
 
 cat > "$HOME/.local/bin/wallpaper-control-centre" <<'LAUNCH'
 #!/usr/bin/env bash
