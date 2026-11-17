@@ -95,7 +95,7 @@ def main():
     def rebuild():
         nonlocal windows
         clear()
-        items = sorted((p for p in desktop.iterdir() if not p.name.startswith(".") and p.is_file() or p.is_dir()),
+        items = sorted((p for p in desktop.iterdir() if not p.name.startswith(".") and (p.is_file() or p.is_dir())),
                        key=lambda p: p.name.casefold())
         display = Gdk.Display.get_default()
         mon = display.get_primary_monitor() or display.get_monitor(0)
