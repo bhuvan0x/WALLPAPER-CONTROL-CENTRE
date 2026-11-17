@@ -22,6 +22,7 @@ chmod 0755 "$APP/xwinwrap"
 
 install -m 0644 "$ROOT/wallpaper_control_centre.py" "$APP/wallpaper_control_centre.py"
 install -m 0644 "$ROOT/live_wallpaper_engine.py" "$APP/live_wallpaper_engine.py"
+install -m 0644 "$ROOT/video_optimizer.py" "$APP/video_optimizer.py"
 install -m 0644 "$ROOT/desktop_icons.py" "$APP/desktop_icons.py"
 install -m 0644 "$ROOT/vendor/xwinwrap/NOVELL-LICENSE.txt" "$APP/XWINWRAP-LICENSE.txt"
 
