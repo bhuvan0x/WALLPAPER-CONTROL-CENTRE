@@ -60,19 +60,22 @@ def desktop_window():
     current = root.get_full_property(atom_current, X.AnyPropertyType)
     current_desktop = int(current.value[0]) if current and len(current.value) else 0
     matches = []
-    for win in root.query_tree().children:
+    # Recurse because reparenting window managers (including xfwm4) may place
+    # the client desktop window below a frame window instead of directly on root.
+    pending = [(win, 0) for win in root.query_tree().children]
+    while pending:
+        win, depth = pending.pop()
         try:
             prop = win.get_full_property(atom_type, X.AnyPropertyType)
-            if not prop or atom_desktop not in list(prop.value):
-                continue
-            geom = win.get_geometry()
-            if geom.width < 320 or geom.height < 240:
-                continue
-            desk = win.get_full_property(atom_wm_desktop, X.AnyPropertyType)
-            desk_id = int(desk.value[0]) if desk and len(desk.value) else 0xFFFFFFFF
-            if desk_id not in (current_desktop, 0xFFFFFFFF):
-                continue
-            matches.append((geom.width * geom.height, win.id, geom.width, geom.height))
+            if prop and atom_desktop in list(prop.value):
+                geom = win.get_geometry()
+                if geom.width >= 320 and geom.height >= 240:
+                    desk = win.get_full_property(atom_wm_desktop, X.AnyPropertyType)
+                    desk_id = int(desk.value[0]) if desk and len(desk.value) else 0xFFFFFFFF
+                    if desk_id in (current_desktop, 0xFFFFFFFF):
+                        matches.append((geom.width * geom.height, win.id, geom.width, geom.height))
+            if depth < 5:
+                pending.extend((child, depth + 1) for child in win.query_tree().children)
         except Exception:
             continue
     if not matches:
