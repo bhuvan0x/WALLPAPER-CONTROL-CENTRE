@@ -31,18 +31,32 @@ mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
 echo "[$(date -Is)] Wallpaper restore hook started."
 
-# Wait until XFCE publishes its desktop wallpaper properties.
+# xfconf-query must use the same D-Bus and X11 session as xfdesktop.
+# Autostart may launch this script without inheriting those variables.
 ready=0
 for attempt in $(seq 1 45); do
-  if /usr/bin/xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -Fq '/last-image'; then
-    ready=1
-    break
+  desktop_pid="$(pgrep -xo xfdesktop 2>/dev/null || true)"
+  if [ -n "$desktop_pid" ] && [ -r "/proc/$desktop_pid/environ" ]; then
+    while IFS= read -r -d "" entry; do
+      case "$entry" in
+        DISPLAY=*|DBUS_SESSION_BUS_ADDRESS=*|XDG_RUNTIME_DIR=*|XAUTHORITY=*)
+          export "$entry"
+          ;;
+      esac
+    done < "/proc/$desktop_pid/environ"
+
+    if [ -n "${DISPLAY:-}" ] &&
+       [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] &&
+       /usr/bin/xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -Fq '/last-image'; then
+      ready=1
+      break
+    fi
   fi
   sleep 1
 done
 
 if [ "$ready" -ne 1 ]; then
-  echo "[$(date -Is)] ERROR: XFCE wallpaper settings did not become ready."
+  echo "[$(date -Is)] ERROR: Could not connect to the running XFCE desktop session."
   exit 1
 fi
 
