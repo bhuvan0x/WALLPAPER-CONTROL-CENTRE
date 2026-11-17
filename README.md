@@ -50,7 +50,7 @@ It installs runtime and build dependencies, pulls this repository's default bran
 
 Open **Static wallpapers** to import and apply an image. Open **Live wallpapers + music** to add a video, start it, pause/resume, restart, stop, and control its soundtrack.
 
-Do not enable daily live restoration until the actual X11 session has passed the video/icon interaction tests on the device.
+The **Restore this live wallpaper at login** option is off by default. Leave it off until the actual X11 session has passed the video/icon interaction tests on the device.
 
 ## CLI
 
