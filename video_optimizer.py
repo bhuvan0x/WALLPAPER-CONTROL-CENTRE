@@ -2,6 +2,7 @@
 """Non-destructive MP4 optimizer for Wallpaper Control Centre."""
 import os
 import shutil
+from fractions import Fraction
 import subprocess
 import threading
 import uuid
@@ -33,6 +34,21 @@ def _duration(path, ffprobe):
         return None
 
 
+def _source_fps(path, ffprobe):
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=avg_frame_rate",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+        text=True, capture_output=True, timeout=20, check=False)
+    if result.returncode:
+        return None
+    try:
+        value = Fraction(result.stdout.strip())
+        return float(value) if value.denominator else None
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def optimize_video(source, output_dir, progress=None):
     """Create a new H.264/AAC copy; never replace or delete the source."""
     source = Path(source).expanduser().resolve()
@@ -44,6 +60,11 @@ def optimize_video(source, output_dir, progress=None):
 
     ffmpeg, ffprobe = _tool("ffmpeg"), _tool("ffprobe")
     duration = _duration(source, ffprobe)
+    source_fps = _source_fps(source, ffprobe)
+    # Do not upsample low-frame-rate clips. Cap only sources above 30 FPS.
+    video_filter = "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"
+    if source_fps and source_fps > 30:
+        video_filter += ",fps=30"
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / f"{source.stem}.optimized.mp4"
     index = 2
@@ -55,7 +76,7 @@ def optimize_video(source, output_dir, progress=None):
     command = [
         ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", str(source),
         "-map", "0:v:0", "-map", "0:a?", "-sn", "-dn",
-        "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps='min(30,source_fps)'",
+        "-vf", video_filter,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart", "-map_metadata", "-1",
