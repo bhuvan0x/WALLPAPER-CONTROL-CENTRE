@@ -130,7 +130,9 @@ def gui():
             self.add_button(live_side,"Stop live wallpaper",self.stop_video)
             live_side.pack_start(Gtk.Label(label="Wallpaper music volume",xalign=0),False,False,0)
             saved=read_json(LIVE_CONFIG); self.volume=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,0,100,1); self.volume.set_value(int(saved.get("volume",65))); self.volume.set_digits(0); live_side.pack_start(self.volume,False,False,0)
+            self.volume.connect("value-changed",self.volume_changed)
             self.audio=Gtk.CheckButton(label="Enable wallpaper audio"); self.audio.set_active(bool(saved.get("audio",True))); live_side.pack_start(self.audio,False,False,0)
+            self.audio.connect("toggled",self.audio_changed)
             hint=Gtk.Label(label="Video loops continuously. Desktop icons and clicks remain above the video layer."); hint.set_line_wrap(True); hint.set_xalign(0); live_side.pack_start(hint,False,False,0)
             self.tabs.append_page(live_page,Gtk.Label(label="Live wallpapers + music"))
             self.status=Gtk.Label(label=str(LIBRARY)); self.status.set_xalign(0); self.status.set_line_wrap(True); root.pack_end(self.status,False,False,0)
@@ -204,8 +206,24 @@ def gui():
             try: self.status.set_text(engine("restart"))
             except WallpaperError as e: self.alert(str(e))
 
+        def volume_changed(self,scale):
+            if not LIVE_CONFIG.is_file(): return
+            try:
+                engine("volume",int(scale.get_value()),check=False)
+            except WallpaperError:
+                pass
+
+        def audio_changed(self,button):
+            if not LIVE_CONFIG.is_file(): return
+            try:
+                self.status.set_text(engine("audio","on" if button.get_active() else "off"))
+            except WallpaperError:
+                pass
+
         def stop_video(self,*_):
-            try: self.status.set_text(engine("stop"))
+            try:
+                engine("stop")
+                self.status.set_text("Live wallpaper stopped • XFCE desktop icons restored")
             except WallpaperError as e: self.alert(str(e))
 
     Main().show_all(); Gtk.main(); return 0
