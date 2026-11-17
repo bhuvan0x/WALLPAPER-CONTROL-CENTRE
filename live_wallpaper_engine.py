@@ -194,7 +194,7 @@ def start(path, volume=65, audio=True, restore_on_login=False):
 
         adapter = 'wid="$1"; shift; exec mpv --wid="$wid" "$@"'
         command = [
-            str(BIN), "-fdt", "-ni", "-fs", "-s", "-st", "-sp", "-b", "-nf", "--",
+            str(BIN), "-fdt", "-ni", "-fs", "-un", "-s", "-st", "-sp", "-b", "-nf", "--",
             "/bin/sh", "-c", adapter, "wallpaper-control-centre", "WID",
             "--no-config", "--vo=x11", "--force-window=yes", "--no-border",
             "--osc=no", "--osd-level=0", "--input-default-bindings=no",
