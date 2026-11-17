@@ -159,7 +159,7 @@ def stop(clear_state=True):
     return True
 
 
-def start(path, volume=65, audio=True):
+def start(path, volume=65, audio=True, restore_on_login=False):
     path = Path(path).expanduser().resolve()
     if not path.is_file() or path.suffix.lower() not in VIDEO_EXTS:
         raise EngineError("Choose a supported video: MP4, MKV, WEBM, MOV, AVI, M4V or OGV.")
@@ -234,7 +234,8 @@ def start(path, volume=65, audio=True):
             "version": 2, "path": str(path), "volume": volume, "audio": bool(audio),
             "wallpaper_pid": wallpaper.pid, "overlay_pid": overlay.pid if overlay else None,
             "original_icon_style": style, "managed_icons": managed_icons,
-            "started": int(time.time()), "backend": "xwinwrap-mpv-desktop-layer"
+            "started": int(time.time()), "restore_on_login": bool(restore_on_login),
+            "backend": "xwinwrap-mpv-desktop-layer"
         })
         return wallpaper.pid
     except Exception:
@@ -271,6 +272,7 @@ def main():
     p.add_argument("video")
     p.add_argument("--volume", type=int, default=65)
     p.add_argument("--no-audio", action="store_true")
+    p.add_argument("--restore-on-login", action="store_true")
     sub.add_parser("stop")
     sub.add_parser("pause")
     sub.add_parser("resume")
@@ -285,7 +287,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == "start":
-            pid = start(args.video, args.volume, not args.no_audio)
+            pid = start(args.video, args.volume, not args.no_audio, args.restore_on_login)
             print(f"Live wallpaper started (PID {pid}).")
         elif args.action == "stop":
             stop()
