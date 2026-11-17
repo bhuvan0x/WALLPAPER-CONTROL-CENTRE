@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ROOT="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP="$HOME/.local/share/wallpaper-control-centre"
 mkdir -p "$APP" "$HOME/.local/bin" "$HOME/.config/autostart" "$HOME/Pictures/Wallpapers"
 install -m 0644 "$ROOT/wallpaper_control_centre.py" "$APP/wallpaper_control_centre.py"
@@ -9,6 +9,17 @@ cat > "$HOME/.local/bin/wallpaper-control-centre" <<'LAUNCH'
 exec /usr/bin/python3 "$HOME/.local/share/wallpaper-control-centre/wallpaper_control_centre.py" "$@"
 LAUNCH
 chmod 0755 "$HOME/.local/bin/wallpaper-control-centre"
+cat > "$HOME/.local/share/applications/wallpaper-control-centre.desktop" <<'APP'
+[Desktop Entry]
+Type=Application
+Name=Wallpaper Control Centre
+Comment=Browse and manage desktop wallpapers
+Exec=/home/prime/.local/bin/wallpaper-control-centre
+Icon=preferences-desktop-wallpaper
+Categories=Settings;DesktopSettings;
+StartupNotify=true
+Terminal=false
+APP
 cat > "$HOME/.config/autostart/wallpaper-control-centre-restore.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
