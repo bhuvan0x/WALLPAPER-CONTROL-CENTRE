@@ -23,6 +23,11 @@ ICON_OVERLAY = APP / "desktop_icons.py"
 BIN = APP / "xwinwrap"
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/runtime-{os.environ.get('USER', 'prime')}"))
 RUNTIME.mkdir(parents=True, exist_ok=True)
+try:
+    if RUNTIME.stat().st_uid == os.getuid():
+        RUNTIME.chmod(0o700)
+except OSError:
+    pass
 IPC = RUNTIME / "wallpaper-control-centre-mpv.sock"
 META = HOME / ".config/wallpaper-control-centre/live.json"
 LOG_DIR = HOME / ".cache/wallpaper-control-centre"
@@ -78,9 +83,9 @@ def set_icon_style(value):
     xfconf("-p", ICON_STYLE, "--create", "-t", "int", "-s", str(int(value)))
 
 
-def pid_alive(pid):
+def group_alive(pgid):
     try:
-        os.kill(int(pid), 0)
+        os.killpg(int(pgid), 0)
         return True
     except (ProcessLookupError, ValueError):
         return False
@@ -97,7 +102,7 @@ def terminate_group(pid, seconds=3):
         return
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if not pid_alive(pid):
+        if not group_alive(pid):
             return
         time.sleep(0.1)
     try:
