@@ -9,7 +9,7 @@ def main():
     try:
         import gi
         gi.require_version("Gtk", "3.0")
-        from gi.repository import Gtk, Gdk, Gio, GLib, GdkPixbuf
+        from gi.repository import Gtk, Gdk, Gio, GLib, Pango
     except Exception as exc:
         print(f"Desktop icon overlay needs GTK 3 / PyGObject: {exc}", file=sys.stderr)
         return 2
@@ -142,17 +142,17 @@ def main():
             label = Gtk.Label(label=label_text)
             label.set_justify(Gtk.Justification.CENTER)
             label.set_line_wrap(True)
-            label.set_line_wrap_mode(2)
+            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
             label.set_max_width_chars(14)
             label.set_lines(2)
-            label.set_ellipsize(3)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
             label.set_size_request(104, -1)
             label.set_halign(Gtk.Align.CENTER)
             box.pack_start(label, False, False, 0)
             event.set_tooltip_text(str(path))
 
             def clicked(widget, ev, target=path):
-                if ev.type == Gdk.EventType._2BUTTON_PRESS and ev.button == 1:
+                if ev.type == Gdk.EventType.DOUBLE_BUTTON_PRESS and ev.button == 1:
                     open_item(target)
                     return True
                 return False
